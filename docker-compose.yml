@@ -1,0 +1,14 @@
+services:
+  ocpp-snoop2mqtt:
+    build: .
+    ports:
+      - "8500:8500"
+      - "8501:8501"
+    restart: unless-stopped
+    environment:
+      RELAY_SERVER: "true"
+      CPMS_URL: wss://<actual OCPP server>/ws/webSocket
+      SNOOP_SOCKET: ws://localhost:8501/
+      MQTT_BROKER_HOST: homeassistant
+      MQTT_BROKER_USER: ocpp
+      MQTT_BROKER_PASS: ocpp
