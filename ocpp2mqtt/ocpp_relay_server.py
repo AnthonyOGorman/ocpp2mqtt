@@ -12,6 +12,8 @@ import yaml
 
 from ocpp2mqtt.relay.ocpprelay import OCPPRelay
 from ocpp2mqtt.relay.snoopws import SnoopWebSocketServer
+from ocpp2mqtt.webui import start_webui
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -119,7 +121,15 @@ async def core():
     msg_queue = asyncio.Queue()
 
     relay = OCPPRelay(args.cpms, snoop_queue=msg_queue)
-    relay_server = await relay.start(args.ocpp_host, args.ocpp_port, ssl_context=ssl_context)
+    relay_server = await relay.start(
+        args.ocpp_host,
+        args.ocpp_port,
+        ssl_context=ssl_context
+    )
+
+    # Start Web UI backend
+    webui_server = start_webui(relay, msg_queue)
+    webui_task = asyncio.create_task(webui_server.serve())
 
     # Snoop server to allow clients to connect and receive a copy of all messages
     # exchanged between charge points and the CSMS. Don't use SSL for localhost.
@@ -127,7 +137,12 @@ async def core():
     snoop_server = await snoop.start(args.snoop_host, args.snoop_port,
         ssl_context=(None if args.snoop_host == 'localhost' else ssl_context))
 
-    await asyncio.gather(relay_server.wait_closed(), snoop_server.wait_closed())
+    await asyncio.gather(
+    relay_server.wait_closed(),
+    snoop_server.wait_closed(),
+    webui_task
+    )
+
 
 def main():
     parse_args()

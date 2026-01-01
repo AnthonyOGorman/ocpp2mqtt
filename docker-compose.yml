@@ -4,6 +4,7 @@ services:
     ports:
       - "8500:8500"
       - "8501:8501"
+      - "8502:8502"
     restart: unless-stopped
     environment:
       RELAY_SERVER: "true"
@@ -12,3 +13,4 @@ services:
       MQTT_BROKER_HOST: homeassistant
       MQTT_BROKER_USER: ocpp
       MQTT_BROKER_PASS: ocpp
+      WEBUI_PORT: 8502

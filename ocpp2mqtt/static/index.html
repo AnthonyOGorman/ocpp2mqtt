@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>OCPP Relay Console</title>
+
+  <style>
+    body {
+      font-family: monospace;
+      margin: 20px;
+      background: #fafafa;
+    }
+
+    h2 {
+      margin-top: 30px;
+    }
+
+    #live_metrics {
+      border: 2px solid #f90;
+      padding: 10px;
+      background: #fff7e6;
+      margin-bottom: 20px;
+      font-weight: bold;
+      white-space: pre;
+    }
+
+    #messages {
+      border: 1px solid #ccc;
+      height: 400px;
+      overflow-y: scroll;
+      background: #fff;
+      padding: 10px;
+    }
+
+    .msg {
+      margin-bottom: 10px;
+      padding: 6px;
+      border-left: 4px solid #999;
+      white-space: pre-wrap;
+    }
+
+    .CP {
+      border-color: green;
+    }
+
+    .CSMS {
+      border-color: blue;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 4px;
+    }
+
+    textarea {
+      width: 100%;
+      font-family: monospace;
+    }
+
+    input, select, button {
+      margin-top: 5px;
+    }
+
+    button {
+      padding: 6px 12px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>OCPP Relay Console</h1>
+
+<h2>Live Solar / Meter Metrics</h2>
+<div id="live_metrics">
+  No data yet
+</div>
+
+<h2>Live Messages</h2>
+<div id="messages"></div>
+
+<h2>Inject Message</h2>
+
+<label>Charge Point</label><br>
+<select id="cp_select"></select><br>
+
+<label>Or manual CP ID (optional)</label><br>
+<input id="cpid" placeholder="AE0022A1GS9C00073M"><br>
+
+<label>Direction</label><br>
+<select id="direction">
+  <option value="to_cp">→ CP</option>
+  <option value="to_csms">→ CSMS</option>
+</select><br>
+
+<label>Raw OCPP JSON</label><br>
+<textarea id="payload" rows="8">
+[2,"getmeters-001","TriggerMessage",{"requestedMessage":"MeterValues"}]
+</textarea><br>
+
+<button onclick="send()">Send</button>
+
+<script>
+const messagesDiv = document.getElementById("messages");
+const cpSelect = document.getElementById("cp_select");
+const liveMetricsDiv = document.getElementById("live_metrics");
+
+// ---------- WebSocket ----------
+const ws = new WebSocket(`ws://${location.host}/ws/snoop`);
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+
+  // Display raw message
+  const div = document.createElement("div");
+  div.className = "msg " + msg.sender;
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent =
+    `CP=${msg.cp_id} | FROM=${msg.sender} | PROTOCOL=${msg.protocol}`;
+
+  const body = document.createElement("div");
+  body.textContent = JSON.stringify(msg.payload, null, 2);
+
+  div.appendChild(meta);
+  div.appendChild(body);
+  messagesDiv.prepend(div);
+
+  // ---------- Parse MeterValues ----------
+  if (msg.payload && Array.isArray(msg.payload)) {
+    const [msgType, msgId, action, payload] = msg.payload;
+
+    if (action === "MeterValues" && payload && payload.meterValue) {
+      // We'll collect all phases / measurands
+      let metricsText = `Connector ${payload.connectorId}\n`;
+
+      payload.meterValue.forEach(mv => {
+        const ts = mv.timestamp || new Date().toISOString();
+        metricsText += `Timestamp: ${ts}\n`;
+
+        mv.sampledValue.forEach(sv => {
+          const phase = sv.phase ? ` (${sv.phase})` : "";
+          metricsText += `${sv.measurand}${phase}: ${sv.value} ${sv.unit}\n`;
+        });
+      });
+
+      // Update the live metrics box
+      liveMetricsDiv.textContent = metricsText;
+    }
+  }
+};
+
+// ---------- Load CPs ----------
+async function loadCPs() {
+  cpSelect.innerHTML = "";
+
+  try {
+    const res = await fetch("/api/cps");
+    const data = await res.json();
+
+    if (!data.cps || data.cps.length === 0) {
+      const opt = document.createElement("option");
+      opt.textContent = "No CP connected";
+      opt.disabled = true;
+      cpSelect.appendChild(opt);
+    } else {
+      data.cps.forEach(cp => {
+        const opt = document.createElement("option");
+        opt.value = cp;
+        opt.textContent = cp;
+        cpSelect.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    const opt = document.createElement("option");
+    opt.textContent = "Failed to load CPs";
+    opt.disabled = true;
+    cpSelect.appendChild(opt);
+  }
+}
+
+setInterval(loadCPs, 3000);
+loadCPs();
+
+// ---------- Injection ----------
+async function send() {
+  const manualCp = document.getElementById("cpid").value.trim();
+  const selectedCp = cpSelect.value;
+  const cp_id = manualCp || selectedCp;
+
+  const direction = document.getElementById("direction").value;
+
+  let payloadInput;
+  try {
+    payloadInput = JSON.parse(document.getElementById("payload").value);
+  } catch {
+    alert("Invalid JSON payload");
+    return;
+  }
+
+  const payloadStr = JSON.stringify(payloadInput);
+
+  try {
+    const res = await fetch("/api/inject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cp_id,
+        direction,
+        payload: payloadStr
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail || "Injection failed");
+    } else {
+      const text = await res.text();
+      console.log("Inject response:", text);
+    }
+  } catch (e) {
+    alert("Network error: " + e.message);
+  }
+}
+</script>
+
+</body>
+</html>

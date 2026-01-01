@@ -16,7 +16,9 @@ dependencies = [
     "paho-mqtt",
     "pyyaml",
     "setuptools",
-    "websockets>=15.0.1"
+    "websockets>=15.0.1",
+    "fastapi>=0.110",
+    "uvicorn>=0.27"
 ]
 
 [project.urls]
@@ -29,3 +31,6 @@ ocpp-snoop2mqtt = "ocpp2mqtt.ocpp_snoop2mqtt:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["ocpp2mqtt", "ocpp2mqtt.*"]
+
+[tool.setuptools]
+include-package-data = true

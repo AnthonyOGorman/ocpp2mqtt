@@ -32,6 +32,9 @@ class OCPPRelay:
         self.logger = logging.getLogger()
         self.csms_url, self.csms_id, self.csms_pass = csms_url, csms_id, csms_pass
         self.snoop_queue = snoop_queue
+        self.cp_connections = {}     # cp_id -> websocket
+        self.csms_connections = {}   # cp_id -> websocket
+
 
     async def _relay(self, source_ws, target_ws, source_name, target_name, cp_id, protocol):
         while True:
@@ -54,6 +57,8 @@ class OCPPRelay:
         self.logger.info(f"WebSocket request headers:\n{json.dumps(dict(ws.request.headers), indent=2)}")
 
         charge_point_id = ws.request.path.strip("/")
+        # Track CP connection
+        self.cp_connections[charge_point_id] = ws
         cp_ws = ws
         try:
             ws_subprotocol = cp_ws.request.headers["Sec-WebSocket-Protocol"]
@@ -84,6 +89,9 @@ class OCPPRelay:
             subprotocols=[ws_subprotocol],
             additional_headers=extra_headers,
         ):
+            # Track CSMS connection
+            self.csms_connections[charge_point_id] = csms_ws
+
             # If the client side disconnected while we were trying to connect,
             # there's no point in reconnecting to the CSMS.
             if getattr(cp_ws, "closed", False):
@@ -109,6 +117,22 @@ class OCPPRelay:
             if getattr(cp_ws, "closed", False):
                 self.logger.info("ChargePoint websocket closed; stopping CSMS reconnect attempts.")
                 break
+        
+        self.logger.info(f"Cleaning up connections for CP {charge_point_id}")
+        self.cp_connections.pop(charge_point_id, None)
+        self.csms_connections.pop(charge_point_id, None)
+
+    async def inject_to_cp(self, cp_id, raw_message: str):
+        ws = self.cp_connections.get(cp_id)
+        if not ws:
+            raise ValueError(f"No CP connection for {cp_id}")
+        await ws.send(raw_message)
+
+    async def inject_to_csms(self, cp_id, raw_message: str):
+        ws = self.csms_connections.get(cp_id)
+        if not ws:
+            raise ValueError(f"No CSMS connection for {cp_id}")
+        await ws.send(raw_message)
 
     async def start(self, host, port, ssl_context=None):
         server = await websockets.serve(self._on_connect, host, port, ssl=ssl_context)
